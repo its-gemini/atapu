@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Glowing Falling Words — Galaxy</title>
+  <style>
+    :root {
+      --accent: #8ff0ff;
+    }
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: #000;
+      font-family: Inter, system-ui, Arial;
+      overflow: hidden;
+    }
+    canvas {
+      display: block;
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+    }
+    #errorOverlay {
+      position: fixed;
+      inset: 0;
+      z-index: 10000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.7));
+      color: #fff;
+      padding: 20px;
+      text-align: center;
+    }
+    #errorOverlay .card {
+      max-width: 520px;
+      background: rgba(12, 12, 20, 0.6);
+      border-radius: 10px;
+      padding: 20px;
+      border: 1px solid rgba(255, 255, 255, 0.04);
+    }
+    #errorOverlay pre {
+      background: rgba(255, 255, 255, 0.04);
+      padding: 8px;
+      border-radius: 6px;
+      color: #fff;
+      text-align: left;
+    }
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <div id="errorOverlay">
+    <div class="card">
+      <h2>Loading...</h2>
+      <p>Initializing Three.js scene...</p>
+    </div>
+  </div>
+
+  <!-- Three.js from CDN -->
+  <script src="https://unpkg.com/three@0.152.2/build/three.min.js"></script>
+
+  <script>
+    // Error overlay
+    const errorOverlay = document.getElementById('errorOverlay');
+
+    function hideOverlay() {
+      if (errorOverlay) {
+        errorOverlay.classList.add('hidden');
+      }
+    }
+
+    function showError(msg) {
+      console.error(msg);
+      if (errorOverlay) {
+        errorOverlay.classList.remove('hidden');
+        const card = errorOverlay.querySelector('.card');
+        if (card) {
+          card.innerHTML = `<h2>Error</h2><p>${msg}</p>`;
+        }
+      }
+    }
+
+    // Global error handlers
+    window.addEventListener('error', (ev) => {
+      console.error('Runtime error', ev.error || ev.message);
+      showError((ev.error && ev.error.message) || ev.message);
+    });
+
+    window.addEventListener('unhandledrejection', (ev) => {
+      console.error('Unhandled promise rejection', ev.reason);
+      showError(String(ev.reason));
+    });
+
+    try {
+      // Three.js scene setup
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x000005);
+
+      const camera = new THREE.PerspectiveCamera(
+        50,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        2000
+      );
+      camera.position.set(0, 0, 80);
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.domElement.style.position = 'fixed';
+      renderer.domElement.style.inset = '0';
+      renderer.domElement.style.zIndex = '0';
+      document.body.appendChild(renderer.domElement);
+
+      // Simple camera controls (pan/zoom via mouse drag and scroll)
+      class SimpleOrbitControls {
+        constructor(camera, domElement) {
+          this.camera = camera;
+          this.domElement = domElement;
+          this.minDistance = 20;
+          this.maxDistance = Infinity;
+          this.enableDamping = true;
+          this.dampingFactor = 0.08;
+          this.enablePan = true;
+          this.autoRotate = false;
+
+          this.theta = 0;
+          this.phi = Math.PI / 2;
+          this.radius = 80;
+          this.tilt = 0; // roll angle for tilt gestures
+          this.panX = 0;
+          this.panY = 0;
+          this.velocityX = 0;
+          this.velocityY = 0;
+
+          this.domElement.addEventListener('mousedown', (e) => this.onMouseDown(e));
+          this.domElement.addEventListener('mousemove', (e) => this.onMouseMove(e));
+          this.domElement.addEventListener('mouseup', (e) => this.onMouseUp(e));
+          // touch support: single-finger drag to rotate, two-finger pinch to zoom
+          this.domElement.addEventListener('touchstart', (e) => this.onTouchStart(e), { passive: false });
+          this.domElement.addEventListener('touchmove', (e) => this.onTouchMove(e), { passive: false });
+          this.domElement.addEventListener('touchend', (e) => this.onTouchEnd(e));
+          this.domElement.addEventListener('wheel', (e) => this.onMouseWheel(e));
+
+          this.isDragging = false;
+          this.previousMousePosition = { x: 0, y: 0 };
+        }
+
+        onMouseDown(e) {
+          this.isDragging = true;
+          this.previousMousePosition = { x: e.clientX, y: e.clientY };
+        }
+
+        onMouseMove(e) {
+          if (!this.isDragging) return;
+          const dx = e.clientX - this.previousMousePosition.x;
+          const dy = e.clientY - this.previousMousePosition.y;
+          this.theta -= dx * 0.005;
+          this.phi += dy * 0.005;
+          this.phi = Math.max(0.1, Math.min(Math.PI - 0.1, this.phi));
+          this.previousMousePosition = { x: e.clientX, y: e.clientY };
+        }
+
+        onMouseUp(e) {
+          this.isDragging = false;
+        }
+
+        // Touch handlers
+        onTouchStart(e) {
+          if (!e.touches) return;
+          if (e.touches.length === 1) {
+            // treat as single-finger drag
+            this.isDragging = true;
+            this.previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+          } else if (e.touches.length === 2) {
+            // pinch start
+            this.isDragging = false;
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            this._prevTouchDist = Math.hypot(dx, dy);
+            // store previous positions for both touches to detect same-direction swipe (tilt)
+            this._prevTouchPositions = [
+              { x: e.touches[0].clientX, y: e.touches[0].clientY },
+              { x: e.touches[1].clientX, y: e.touches[1].clientY },
+            ];
+            // store mid-point for optional two-finger rotate/pan
+            this._prevTouchMid = { x: (e.touches[0].clientX + e.touches[1].clientX) / 2, y: (e.touches[0].clientY + e.touches[1].clientY) / 2 };
+          }
+        }
+
+        onTouchMove(e) {
+          if (!e.touches) return;
+          if (e.touches.length === 1 && this.isDragging) {
+            e.preventDefault();
+            const dx = e.touches[0].clientX - this.previousMousePosition.x;
+            const dy = e.touches[0].clientY - this.previousMousePosition.y;
+            this.theta -= dx * 0.005;
+            this.phi += dy * 0.005;
+            this.phi = Math.max(0.1, Math.min(Math.PI - 0.1, this.phi));
+            this.previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+          } else if (e.touches.length === 2) {
+            e.preventDefault();
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            const dist = Math.hypot(dx, dy);
+            if (this._prevTouchDist) {
+              // pinch delta: positive when fingers move apart -> zoom out (increase radius) or vice versa
+              const delta = this._prevTouchDist - dist;
+              // adjust radius with a tuned factor
+              this.radius += delta * 0.12;
+              this.radius = Math.max(this.minDistance, Math.min(this.maxDistance, this.radius));
+            }
+            this._prevTouchDist = dist;
+            // update mid-point (optionally could pan/rotate)
+            this._prevTouchMid = { x: (e.touches[0].clientX + e.touches[1].clientX) / 2, y: (e.touches[0].clientY + e.touches[1].clientY) / 2 };
+          }
+        }
+
+        onTouchEnd(e) {
+          this.isDragging = false;
+          this._prevTouchDist = null;
+          this._prevTouchMid = null;
+        }
+
+        onMouseWheel(e) {
+          e.preventDefault();
+          this.radius += e.deltaY * 0.05;
+          this.radius = Math.max(this.minDistance, Math.min(this.maxDistance || Infinity, this.radius));
+        }
+
+        update() {
+          const x = this.radius * Math.sin(this.phi) * Math.cos(this.theta) + this.panX;
+          const y = this.radius * Math.cos(this.phi) + this.panY;
+          const z = this.radius * Math.sin(this.phi) * Math.sin(this.theta);
+          this.camera.position.set(x, y, z);
+          // apply roll/tilt by adjusting camera.up before looking at target
+          this.camera.up.set(Math.sin(this.tilt), Math.cos(this.tilt), 0);
+          this.camera.lookAt(this.panX, this.panY, 0);
+        }
+      }
+
+      // Initialize simple controls
+      const controls = new SimpleOrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.08;
+      controls.enablePan = true;
+      controls.minDistance = 20;
+      controls.maxDistance = 300;
+      // Reset camera to face directly at the canvas from the front
+      controls.theta = Math.PI / 2; // face forward (0, 0, 80)
+      controls.phi = Math.PI / 2; // level with center
+      controls.radius = 80;
+      controls.update(); // apply the initial position
+
+      // Starfield
+      function makeStarfield(count = 2500) {
+        const geo = new THREE.BufferGeometry();
+        const positions = new Float32Array(count * 3);
+        const colors = new Float32Array(count * 3);
+        for (let i = 0; i < count; i++) {
+          const r = 300;
+          const x = (Math.random() - 0.5) * r;
+          const y = (Math.random() - 0.5) * r * 0.6;
+          const z = (Math.random() - 0.5) * r;
+          positions[i * 3] = x;
+          positions[i * 3 + 1] = y;
+          positions[i * 3 + 2] = z;
+          const c = 0.6 + Math.random() * 0.4;
+          colors[i * 3] = c;
+          colors[i * 3 + 1] = c;
+          colors[i * 3 + 2] = 1.0;
+        }
+        geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        const mat = new THREE.PointsMaterial({
+          size: 0.9,
+          vertexColors: true,
+          transparent: true,
+          opacity: 0.9,
+        });
+        const points = new THREE.Points(geo, mat);
+        scene.add(points);
+      }
+      makeStarfield(2500);
+
+      // Nebula
+      function makeNebula() {
+        const size = 1024;
+        const cvs = document.createElement('canvas');
+        cvs.width = cvs.height = size;
+        const ctx = cvs.getContext('2d');
+        const grad = ctx.createRadialGradient(
+          size * 0.45,
+          size * 0.35,
+          40,
+          size * 0.5,
+          size * 0.45,
+          size * 0.9
+        );
+        grad.addColorStop(0, 'rgba(120,80,200,0.7)');
+        grad.addColorStop(0.4, 'rgba(60,100,200,0.35)');
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, size, size);
+        const tex = new THREE.CanvasTexture(cvs);
+        const geo = new THREE.PlaneGeometry(400, 400, 1, 1);
+        const mat = new THREE.MeshBasicMaterial({
+          map: tex,
+          transparent: true,
+          depthWrite: false,
+        });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(0, 10, -80);
+        mesh.rotation.set(0, 0, 0);
+        scene.add(mesh);
+      }
+      makeNebula();
+
+      // Words and sprites
+      let sprites = [];
+
+      // Hard-coded words list
+      const WORDS = [
+        'i love youuu my pretty babyyy i hope you have a nice gentle day <3',
+        'my baby',
+        'my love',
+        'my ahbibi',
+        'my soulmate',
+        '💫',
+        'my darling',
+        'my pookie wookie',
+        '✨',
+        '🌙',
+        'my pangga',
+        'my palangga',
+        'my langga',
+        'my asawa',
+        'my sayang',
+        'my lalove',
+        'my palalove',
+        'my lovelove',
+        'my baby girl',
+        'mi amor',
+        'my loml',
+        'my sweetheart',
+        'my everything',
+        'my person',
+        'my one and only',
+        'my forever',
+        'my heart',
+        'my treasure',
+        'my joy',
+        'my happiness',
+        'my world',
+        'my home',
+        'my rest',
+        'my comfort',
+        'my happiness',
+        'my peace',
+        '💖',
+        '💘',
+        '💝',
+        '💞',
+        '💕',
+        'my safe place',
+        'my answered prayer',
+        'my one and only love',
+        'my one and only',
+        'my pretty girl',
+        'my wife',
+        'my whole world',
+        'my universe',
+        'my queen',
+        'my princess',
+        'my heart',
+        'im here for you',
+        'im here',
+        'im right here with you',
+        'you have me always',
+        'i love you sooosososoooo much always forever!!!',
+        'you are my one and only always forever',
+        'i love youuu my pretty babyyy i hope you have a nice gentle day <3',
+        'i love youuu my pretty babyyy i hope you have a nice gentle day <3',
+        'i love youuu my pretty babyyy i hope you have a nice gentle day <3',
+        'i love youuu my pretty babyyy i hope you have a nice gentle day <3',
+        'i love youuu my pretty babyyy i hope you have a nice gentle day <3',
+        'i love youuu my pretty babyyy i hope you have a nice gentle day <3',
+        'i love youuu my pretty babyyy i hope you have a nice gentle day <3',
+        'i love youuu my pretty babyyy i hope you have a nice gentle day <3',
+        'i love youuu my pretty babyyy i hope you have a nice gentle day <3',
+        'my baby',
+        'my love',
+        'my ahbibi',
+        'my soulmate',
+        '💫',
+        'my darling',
+        'my pookie wookie',
+        '✨',
+        '🌙',
+        'my pangga',
+        'my palangga',
+        'my langga',
+        'my asawa',
+        'my sayang',
+        'my lalove',
+        'my palalove',
+        'my lovelove',
+        'my baby girl',
+        'mi amor',
+        'my loml',
+        'my sweetheart',
+        'my everything',
+        'my person',
+        'my one and only',
+        'my forever',
+        'my heart',
+        'my treasure',
+        'my joy',
+        'my happiness',
+        'my world',
+        'my home',
+        'my rest',
+        'my comfort',
+        'my happiness',
+        'my peace',
+        '💖',
+        '💘',
+        '💝',
+        '💞',
+        '💕',
+        'my safe place',
+        'my answered prayer',
+        'my one and only love',
+        'my one and only',
+        'my pretty girl',
+        'my wife',
+        'my whole world',
+        'my universe',
+        'my queen',
+        'my princess',
+        'my heart',
+        'im here for you',
+        'im here',
+        'im right here with you',
+        'you have me always',
+        'i love you sooosososoooo much always forever!!!',
+        'you are my one and only always forever',
+        '💖',
+        '💘',
+        '💝',
+        '💞',
+        '💕',
+        '💖',
+        '💘',
+        '💝',
+        '💞',
+        '💕',
+        '💖',
+        '💗',
+        '💗',
+        '💗',
+        '💗',
+        '💗',
+        '💗',
+        '💗',
+        '💗',
+        '💗',
+        '💗',
+        '💖',
+        '💘',
+        '💝',
+        '💞',
+        '💕',
+        '💖',
+        '💘',
+        '💝',
+        '💞',
+        '💕',
+        '💖',
+        '💗',
+        '💗',
+        '💗',
+        'i believe in you every single day babyy',
+        'im so proud of you my love',
+        'you are amazing and wonderful',
+        'go through your day knowing youre loved🫂 supported🫂 and held close🫂 always🫂💗💗',
+        'im right here cheering for you😘😘😘😘😘',
+        'my beautiful girl',
+
+
+
+      ];
+
+      function makeTextSprite(text, opts = {}) {
+        const font = opts.font || '40px Arial';
+        const padding = opts.padding ?? 60;
+        const color = opts.color || '#ffffff';
+        const glow = opts.glow || '#7af0ff';
+        const cvs = document.createElement('canvas');
+        const ctx = cvs.getContext('2d');
+        ctx.font = font;
+        const metrics = ctx.measureText(text);
+        const w = Math.ceil(metrics.width) + padding * 2;
+        const h = Math.ceil(parseInt(font, 10)) + padding * 2;
+        cvs.width = w;
+        cvs.height = h;
+        const ctx2 = cvs.getContext('2d');
+        ctx2.clearRect(0, 0, w, h);
+        ctx2.textAlign = 'center';
+        ctx2.textBaseline = 'middle';
+        ctx2.font = font;
+        // Triple shadow layers for smooth, radiant glow effect
+        ctx2.shadowColor = 'rgba(255, 51, 102, 0.8)';
+        ctx2.shadowBlur = 120;
+        ctx2.shadowOffsetX = 0;
+        ctx2.shadowOffsetY = 0;
+        ctx2.fillStyle = color;
+        ctx2.fillText(text, w / 2, h / 2);
+        
+        ctx2.shadowColor = 'rgba(233, 30, 99, 0.6)';
+        ctx2.shadowBlur = 60;
+        ctx2.fillText(text, w / 2, h / 2);
+        
+        ctx2.shadowColor = 'rgba(194, 24, 91, 0.4)';
+        ctx2.shadowBlur = 30;
+        ctx2.fillText(text, w / 2, h / 2);
+        
+        ctx2.shadowColor = 'transparent';
+        ctx2.lineWidth = 2;
+        ctx2.strokeStyle = 'rgba(255,255,255,0.15)';
+        ctx2.strokeText(text, w / 2, h / 2);
+        const texture = new THREE.CanvasTexture(cvs);
+        texture.needsUpdate = true;
+        const material = new THREE.SpriteMaterial({
+          map: texture,
+          transparent: true,
+          depthTest: true,
+          blending: THREE.AdditiveBlending,
+        });
+        const sprite = new THREE.Sprite(material);
+        const scale = opts.scale || 0.09;
+        sprite.scale.set((w * scale) / 2, (h * scale) / 2, 1);
+        return sprite;
+      }
+
+      function spawnWords(list) {
+        sprites.forEach((s) => {
+          scene.remove(s.obj);
+          if (s.obj.material.map) s.obj.material.map.dispose();
+          s.obj.material.dispose();
+        });
+        sprites = [];
+        const count = list.length;
+        for (let i = 0; i < count; i++) {
+          const text = list[i].trim();
+          if (!text) continue;
+          const spr = makeTextSprite(text, {
+            font: '56px system-ui, Arial',
+            glow: '#ff1493',
+            scale: 0.08,
+          });
+          spr.position.x = (Math.random() - 0.5) * 180;
+          spr.position.y = 80 + Math.random() * 240;
+          spr.position.z = (Math.random() - 0.5) * 100;
+          scene.add(spr);
+          sprites.push({
+            obj: spr,
+            // moderate base speed: between ~0.4 and ~1.0 (faster than before)
+            speed: 0.4 + Math.random() * 0.6,
+            sway: Math.random() * 0.2 + 0.05,
+            baseX: spr.position.x,
+          });
+        }
+      }
+
+      spawnWords(WORDS);
+
+      // Animation loop
+      let last = performance.now();
+      function animate() {
+        requestAnimationFrame(animate);
+        const now = performance.now();
+        const dt = (now - last) / 16.666;
+        last = now;
+
+        const spdFactor = 1.0;
+        sprites.forEach((s) => {
+          // global multiplier increased to speed up descent a bit
+          s.obj.position.y -= s.speed * spdFactor * dt * 0.6;
+          s.obj.position.x =
+            s.baseX + Math.sin(now * 0.001 * s.sway) * (2 + s.sway * 2);
+          s.obj.material.opacity = 0.95;
+          if (s.obj.position.y < -140) {
+            s.obj.position.y = 180 + Math.random() * 60;
+            s.baseX = (Math.random() - 0.5) * 180;
+            s.obj.position.z = (Math.random() - 0.5) * 120;
+          }
+        });
+
+        controls.update();
+        renderer.render(scene, camera);
+      }
+      animate();
+
+      // Handle resize
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+
+      // Hide the loading overlay
+      hideOverlay();
+    } catch (err) {
+      showError('Failed to initialize: ' + err.message);
+      console.error(err);
+    }
+  </script>
+</body>
+</html>
