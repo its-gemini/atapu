@@ -139,6 +139,10 @@
           this.domElement.addEventListener('mousedown', (e) => this.onMouseDown(e));
           this.domElement.addEventListener('mousemove', (e) => this.onMouseMove(e));
           this.domElement.addEventListener('mouseup', (e) => this.onMouseUp(e));
+          // touch support: single-finger drag to rotate, two-finger pinch to zoom
+          this.domElement.addEventListener('touchstart', (e) => this.onTouchStart(e), { passive: false });
+          this.domElement.addEventListener('touchmove', (e) => this.onTouchMove(e), { passive: false });
+          this.domElement.addEventListener('touchend', (e) => this.onTouchEnd(e));
           this.domElement.addEventListener('wheel', (e) => this.onMouseWheel(e));
 
           this.isDragging = false;
@@ -162,6 +166,58 @@
 
         onMouseUp(e) {
           this.isDragging = false;
+        }
+
+        // Touch handlers
+        onTouchStart(e) {
+          if (!e.touches) return;
+          if (e.touches.length === 1) {
+            // treat as single-finger drag
+            this.isDragging = true;
+            this.previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+          } else if (e.touches.length === 2) {
+            // pinch start
+            this.isDragging = false;
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            this._prevTouchDist = Math.hypot(dx, dy);
+            // store mid-point for optional two-finger rotate/pan
+            this._prevTouchMid = { x: (e.touches[0].clientX + e.touches[1].clientX) / 2, y: (e.touches[0].clientY + e.touches[1].clientY) / 2 };
+          }
+        }
+
+        onTouchMove(e) {
+          if (!e.touches) return;
+          if (e.touches.length === 1 && this.isDragging) {
+            e.preventDefault();
+            const dx = e.touches[0].clientX - this.previousMousePosition.x;
+            const dy = e.touches[0].clientY - this.previousMousePosition.y;
+            this.theta -= dx * 0.005;
+            this.phi += dy * 0.005;
+            this.phi = Math.max(0.1, Math.min(Math.PI - 0.1, this.phi));
+            this.previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+          } else if (e.touches.length === 2) {
+            e.preventDefault();
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            const dist = Math.hypot(dx, dy);
+            if (this._prevTouchDist) {
+              // pinch delta: positive when fingers move apart -> zoom out (increase radius) or vice versa
+              const delta = this._prevTouchDist - dist;
+              // adjust radius with a tuned factor
+              this.radius += delta * 0.12;
+              this.radius = Math.max(this.minDistance, Math.min(this.maxDistance, this.radius));
+            }
+            this._prevTouchDist = dist;
+            // update mid-point (optionally could pan/rotate)
+            this._prevTouchMid = { x: (e.touches[0].clientX + e.touches[1].clientX) / 2, y: (e.touches[0].clientY + e.touches[1].clientY) / 2 };
+          }
+        }
+
+        onTouchEnd(e) {
+          this.isDragging = false;
+          this._prevTouchDist = null;
+          this._prevTouchMid = null;
         }
 
         onMouseWheel(e) {
