@@ -203,20 +203,33 @@
             this.phi = Math.max(0.1, Math.min(Math.PI - 0.1, this.phi));
             this.previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
           } else if (e.touches.length === 2) {
-            e.preventDefault();
-            const dx = e.touches[0].clientX - e.touches[1].clientX;
-            const dy = e.touches[0].clientY - e.touches[1].clientY;
-            const dist = Math.hypot(dx, dy);
-            if (this._prevTouchDist) {
-              // pinch delta: positive when fingers move apart -> zoom out (increase radius) or vice versa
-              const delta = this._prevTouchDist - dist;
-              // adjust radius with a tuned factor
-              this.radius += delta * 0.12;
-              this.radius = Math.max(this.minDistance, Math.min(this.maxDistance, this.radius));
-            }
-            this._prevTouchDist = dist;
-            // update mid-point (optionally could pan/rotate)
-            this._prevTouchMid = { x: (e.touches[0].clientX + e.touches[1].clientX) / 2, y: (e.touches[0].clientY + e.touches[1].clientY) / 2 };
+              e.preventDefault();
+              // compute individual touch movement deltas
+              const prev = this._prevTouchPositions || [ { x: e.touches[0].clientX, y: e.touches[0].clientY }, { x: e.touches[1].clientX, y: e.touches[1].clientY } ];
+              const dx0 = e.touches[0].clientX - prev[0].x; const dy0 = e.touches[0].clientY - prev[0].y;
+              const dx1 = e.touches[1].clientX - prev[1].x; const dy1 = e.touches[1].clientY - prev[1].y;
+              // if both fingers move in roughly same direction, interpret as tilt (roll)
+              const sameDirection = (Math.sign(dx0) === Math.sign(dx1) && Math.sign(dy0) === Math.sign(dy1) && Math.abs(dx0 - dx1) < 30 && Math.abs(dy0 - dy1) < 30);
+              if (sameDirection) {
+                // average horizontal movement controls roll
+                const avgDx = (dx0 + dx1) / 2;
+                this.tilt += avgDx * 0.004; // tune sensitivity
+              } else {
+                // treat as pinch zoom
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                const dist = Math.hypot(dx, dy);
+                if (this._prevTouchDist) {
+                  const delta = this._prevTouchDist - dist;
+                  this.radius += delta * 0.12;
+                  this.radius = Math.max(this.minDistance, Math.min(this.maxDistance || Infinity, this.radius));
+                }
+                this._prevTouchDist = dist;
+              }
+              // update stored positions for next move
+              this._prevTouchPositions = [ { x: e.touches[0].clientX, y: e.touches[0].clientY }, { x: e.touches[1].clientX, y: e.touches[1].clientY } ];
+              // update mid-point
+              this._prevTouchMid = { x: (e.touches[0].clientX + e.touches[1].clientX) / 2, y: (e.touches[0].clientY + e.touches[1].clientY) / 2 };
           }
         }
 
